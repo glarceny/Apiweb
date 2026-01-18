@@ -2,15 +2,23 @@ import fs from 'fs';
 import path from 'path';
 import { CONFIG } from './config';
 
+// Detect if running on Vercel
+const IS_VERCEL = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+// Use /tmp for writable storage in serverless environment
+// Note: This data is ephemeral on Vercel and will reset on cold start.
+// For persistent production data, you MUST use an external DB (MongoDB, Postgres, Firebase).
+const DB_PATH = IS_VERCEL ? '/tmp/database' : CONFIG.DB_PATH;
+
 // Ensure DB directory exists
-if (!fs.existsSync(CONFIG.DB_PATH)) {
-    fs.mkdirSync(CONFIG.DB_PATH, { recursive: true });
+if (!fs.existsSync(DB_PATH)) {
+    fs.mkdirSync(DB_PATH, { recursive: true });
 }
 
 const FILES = {
-    USERS: path.join(CONFIG.DB_PATH, 'users.json'),
-    TRANSACTIONS: path.join(CONFIG.DB_PATH, 'transactions.json'),
-    PRODUCTS: path.join(CONFIG.DB_PATH, 'products.json') // Optional if you want dynamic products
+    USERS: path.join(DB_PATH, 'users.json'),
+    TRANSACTIONS: path.join(DB_PATH, 'transactions.json'),
+    PRODUCTS: path.join(DB_PATH, 'products.json') 
 };
 
 // Generic Read
@@ -26,7 +34,11 @@ const readJson = (file: string) => {
 
 // Generic Write
 const writeJson = (file: string, data: any) => {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    try {
+        fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    } catch (e) {
+        console.error("DB Write Error:", e);
+    }
 };
 
 export const DB = {

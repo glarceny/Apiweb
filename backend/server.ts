@@ -250,6 +250,12 @@ app.get('/api/history/:userId', (req, res) => {
     res.json({ success: true, data: trxs });
 });
 
-app.listen(CONFIG.PORT, () => {
-    console.log(`OrbitCloud Backend running on http://localhost:${CONFIG.PORT}`);
-});
+// --- VERCEL ADAPTER ---
+// Export 'app' for Vercel, OR listen if running locally
+if (!process.env.VERCEL) {
+    app.listen(CONFIG.PORT, () => {
+        console.log(`OrbitCloud Backend running on http://localhost:${CONFIG.PORT}`);
+    });
+}
+
+export default app;

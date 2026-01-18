@@ -1,9 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, User, Product, Transaction, ApiResponse, ProductCatalog } from './types';
-import { SIMULATION_MODE } from './constants'; // Though we check config from backend, we keep UI consistent
+import { SIMULATION_MODE } from './constants'; 
 
 // --- API UTILITY ---
-const API_URL = 'http://localhost:3000/api'; 
+// Logic: Gunakan deteksi hostname agar bekerja baik di Vercel maupun Localhost
+const getApiUrl = () => {
+  // Cek apakah kode berjalan di browser
+  if (typeof window === 'undefined') return '/api';
+  
+  const hostname = window.location.hostname;
+  
+  // Jika berjalan di localhost atau 127.0.0.1, gunakan URL backend local
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+     return 'http://localhost:3000/api';
+  }
+  
+  // Untuk Vercel (production) atau akses via IP Network (misal tes di HP via WiFi 192.168.x.x), 
+  // gunakan relative path '/api'. Ini akan otomatis mengikuti domain/IP dan protokol (HTTPS/HTTP).
+  return '/api';
+};
+
+const API_URL = getApiUrl();
 
 async function apiCall<T>(endpoint: string, method: string = 'GET', body?: any): Promise<ApiResponse<T>> {
     try {
@@ -20,12 +37,17 @@ async function apiCall<T>(endpoint: string, method: string = 'GET', body?: any):
             body: body ? JSON.stringify(body) : undefined
         });
         
-        // Handle non-200 responses that return JSON
+        if (!res.ok) {
+            // Handle HTTP errors (404, 500, etc)
+            const errorData = await res.json().catch(() => ({}));
+            return { success: false, message: errorData.message || `Server Error: ${res.status}` };
+        }
+
         const data = await res.json();
-        // If the backend returns success: false, it's captured here
         return data; 
     } catch (e) {
-        return { success: false, message: "Network Error" };
+        console.error("API Call Error:", e);
+        return { success: false, message: "Gagal terhubung ke server. Pastikan backend berjalan." };
     }
 }
 
@@ -603,38 +625,79 @@ const SuccessPage: React.FC<{ transaction: Transaction; onBack: () => void; user
 
 // --- Component: History Page ---
 const HistoryPage: React.FC<{ userId: string }> = ({ userId }) => {
-    const [history, setHistory] = useState<Transaction[]>([]);
-    const [loading, setLoading] = useState(true);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        apiCall<Transaction[]>(`/history/${userId}`).then(res => {
-            if(res.success && res.data) setHistory(res.data);
-            setLoading(false);
-        });
-    }, [userId]);
+  useEffect(() => {
+      // apiCall is async
+      apiCall<Transaction[]>(`/history/${userId}`).then(res => {
+          if (res.success && res.data) {
+              setTransactions(res.data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+          }
+          setLoading(false);
+      });
+  }, [userId]);
 
-    return (
-        <div className="grid gap-4">
-            <h2 className="font-bold text-lg text-slate-800 mb-2">Riwayat Transaksi</h2>
-            {loading ? <div className="text-center py-10"><i className="fas fa-spinner fa-spin text-slate-400"></i></div> : 
-             history.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">Belum ada transaksi</div> :
-             history.map(trx => (
-                 <div key={trx.order_id} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
-                     <div>
-                         <div className="text-xs font-bold text-slate-400">{trx.order_id}</div>
-                         <div className="font-bold text-slate-800">{trx.paket_name}</div>
-                     </div>
-                     <div className="text-right">
-                         <span className={`text-xs font-bold px-2 py-1 rounded ${trx.status === 'paid' ? 'bg-green-100 text-green-600' : trx.status === 'pending' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600'}`}>
-                             {trx.status.toUpperCase()}
-                         </span>
-                         <div className="text-xs text-slate-500 mt-1">{formatRupiah(trx.amount)}</div>
-                     </div>
-                 </div>
-             ))
-            }
-        </div>
-    );
+  if (loading) {
+      return (
+          <div className="flex justify-center items-center py-20">
+              <i className="fas fa-spinner fa-spin text-4xl text-slate-200"></i>
+          </div>
+      );
+  }
+
+  return (
+      <div className="space-y-6 animate-[fadeInfo_0.4s_ease-out]">
+          <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-800">Riwayat Transaksi</h2>
+              <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full">{transactions.length} Total</span>
+          </div>
+          
+          {transactions.length === 0 ? (
+              <div className="text-center py-20 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300 text-2xl shadow-sm"><i className="fas fa-receipt"></i></div>
+                  <p className="text-slate-500 font-bold">Belum ada transaksi</p>
+                  <p className="text-xs text-slate-400 mt-1">Pesanan Anda akan muncul disini.</p>
+              </div>
+          ) : (
+              <div className="grid gap-4">
+                  {transactions.map(tx => (
+                      <div key={tx.order_id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition flex flex-col md:flex-row md:items-center justify-between gap-4 group">
+                          <div className="flex items-center gap-4">
+                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white shadow-lg ${
+                                  tx.status === 'paid' ? 'bg-emerald-500 shadow-emerald-200' : 
+                                  tx.status === 'pending' ? 'bg-orange-500 shadow-orange-200' : 'bg-red-500 shadow-red-200'
+                              }`}>
+                                  <i className={`fas ${tx.status === 'paid' ? 'fa-check' : tx.status === 'pending' ? 'fa-clock' : 'fa-times'}`}></i>
+                              </div>
+                              <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 uppercase tracking-wide">{tx.paket_type}</span>
+                                      <span className="text-[10px] text-slate-300 font-mono">{tx.order_id}</span>
+                                  </div>
+                                  <h4 className="font-bold text-slate-800">{tx.paket_name}</h4>
+                                  <div className="text-xs text-slate-500 mt-0.5">Username: <span className="font-bold">{tx.username_req}</span></div>
+                              </div>
+                          </div>
+                          
+                          <div className="flex items-center justify-between md:justify-end gap-6 border-t md:border-t-0 border-slate-50 pt-3 md:pt-0">
+                              <div className="text-right">
+                                  <div className="text-[10px] font-bold text-slate-400 uppercase">Total</div>
+                                  <div className="font-black text-slate-900">{formatRupiah(tx.amount)}</div>
+                              </div>
+                              <div className={`px-4 py-2 rounded-xl text-xs font-bold capitalize ${
+                                  tx.status === 'paid' ? 'bg-emerald-50 text-emerald-600' : 
+                                  tx.status === 'pending' ? 'bg-orange-50 text-orange-600' : 'bg-red-50 text-red-600'
+                              }`}>
+                                  {tx.status}
+                              </div>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          )}
+      </div>
+  );
 };
 
 // --- Main App Component ---
